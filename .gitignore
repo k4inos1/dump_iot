@@ -1,0 +1,15 @@
+# Secretos y Llaves (¡NUNCA SUBIR!)
+
+# Secretos
+.env
+kainos-auditor-firebase-adminsdk-*.json
+networks.json
+
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+
+# Logs
+*.log

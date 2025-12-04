@@ -1,0 +1,6 @@
+firebase-admin
+python-dotenv
+customtkinter
+packaging
+pillow
+rich
