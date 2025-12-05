@@ -18,8 +18,8 @@
 *   **��️ Modo Sigiloso:** Operación pasiva en "Modo Monitor" indetectable por la mayoría de los sistemas.
 *   **⚡ Respuesta Activa:** Capacidad de inyección de paquetes (Deauth) para pruebas de seguridad y captura de handshakes.
 *   **🖥️ Consola Multi-Interfaz:**
-    *   **CLI (Terminal):** Para servidores y usuarios avanzados (basada en Rich).
-    *   **GUI (Gráfica):** Interfaz moderna y visual (basada en CustomTkinter).
+    *   **CLI (Terminal):** Para servidores y usuarios avanzados (basada en `Rich`).
+    *   **GUI (Gráfica):** Interfaz moderna y visual (basada en `CustomTkinter`).
 
 ---
 
@@ -28,13 +28,13 @@
 El sistema se compone de dos nodos principales desacoplados físicamente:
 
 1.  **El Agente (Raspberry Pi):**
-    *   Ejecuta kainos.py como servicio del sistema (systemd).
-    *   Gestiona la tarjeta Wi-Fi en modo monitor (irmon-ng).
+    *   Ejecuta `kainos.py` como servicio del sistema (`systemd`).
+    *   Gestiona la tarjeta Wi-Fi en modo monitor (`airmon-ng`).
     *   Publica telemetría en Firebase.
     *   Escucha y ejecuta comandos remotos.
 
 2.  **La Consola (PC Windows/Linux):**
-    *   Ejecuta console.py.
+    *   Ejecuta `console.py`.
     *   Visualiza los datos en tiempo real.
     *   Envía comandos de ataque o gestión al agente.
 
@@ -61,22 +61,22 @@ El sistema se compone de dos nodos principales desacoplados físicamente:
 
 Transfiere los archivos del proyecto a tu Raspberry Pi:
 
-`ash
+```bash
 # Desde tu PC (PowerShell)
 scp -r . pi@<IP_DE_TU_RPI>:/home/pi/dump_iot/
-`
+```
 
 ### 2. Instalación Automática
 
 Conéctate por SSH a la Raspberry Pi y ejecuta el instalador integrado:
 
-`ash
+```bash
 ssh pi@<IP_DE_TU_RPI>
 cd dump_iot
 
 # Este comando instala dependencias (aircrack-ng, python libs) y configura el servicio
 sudo python3 kainos.py install
-`
+```
 
 El agente se iniciará automáticamente y comenzará a reportar a la nube.
 
@@ -84,9 +84,9 @@ El agente se iniciará automáticamente y comenzará a reportar a la nube.
 
 Asegúrate de tener las dependencias instaladas en tu máquina local:
 
-`ash
+```bash
 pip install -r requirements.txt
-`
+```
 
 ---
 
@@ -96,21 +96,21 @@ pip install -r requirements.txt
 
 Puedes iniciar la consola en modo interactivo, que te permitirá elegir entre la interfaz gráfica o de texto:
 
-`ash
+```bash
 python console.py
-`
+```
 
 ### Comandos Disponibles (Desde la Consola)
 
 *   **Escanear:** El agente escanea automáticamente (Channel Hopping).
 *   **Atacar (Deauth):** Selecciona una red y envía paquetes de desautenticación para desconectar clientes.
-*   **Reiniciar Agente:** Envía un comando de eboot a la Raspberry Pi remota.
+*   **Reiniciar Agente:** Envía un comando de `reboot` a la Raspberry Pi remota.
 
 ---
 
 ## 📂 Estructura del Proyecto
 
-`	ext
+```text
 dump_iot/
 ├── kainos.py           # CEREBRO: Script principal del agente (IoT)
 ├── console.py          # INTERFAZ: Launcher de la consola de control
@@ -119,7 +119,7 @@ dump_iot/
 ├── requirements.txt    # Dependencias de Python
 ├── INFORME_TECNICO.md  # Documentación detallada del proyecto
 └── ...
-`
+```
 
 ---
 
