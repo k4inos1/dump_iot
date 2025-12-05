@@ -1,215 +1,128 @@
 import customtkinter as ctk
-import subprocess
-import threading
-import os
+import firebase_admin
+from firebase_admin import credentials, db
+import glob
 import sys
+import threading
 import time
-from PIL import Image
-import json
 
-# Configuración de tema
+# --- CONFIGURACIÓN ---
 ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("green")
+ctk.set_default_color_theme("blue")
 
-class KainosConsole(ctk.CTk):
+KEY_FILES = glob.glob("kainos-auditor-firebase-adminsdk-*.json")
+if not KEY_FILES:
+    print("❌ ERROR: No se encontró la llave JSON de Firebase.")
+    sys.exit(1)
+
+DB_URL = "https://kainos-auditor-default-rtdb.firebaseio.com/"
+
+# Inicializar Firebase
+if not firebase_admin._apps:
+    cred = credentials.Certificate(KEY_FILES[0])
+    firebase_admin.initialize_app(cred, {'databaseURL': DB_URL})
+
+ref_root = db.reference('kainos_auditor')
+
+class KainosGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
-
-        self.title("KAINOS AUDITOR - ADVANCED COMMAND CENTER")
-        self.geometry("1000x700")
+        self.title("Kainos Auditor - Command Center")
+        self.geometry("1100x700")
+        
+        # Layout
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
-
-        # --- VARIABLES DE CONTROL ---
-        self.sync_process = None
-        self.target_bssid_var = ctk.StringVar()
-        self.target_ip_var = ctk.StringVar(value="192.168.1.0/24")
-        self.channel_var = ctk.StringVar(value="Auto")
-        self.ports_var = ctk.StringVar(value="Top 100")
-
-        # --- SIDEBAR (MENÚ) ---
-        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
+        
+        # --- SIDEBAR ---
+        self.sidebar = ctk.CTkFrame(self, width=220, corner_radius=0)
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(8, weight=1)
+        
+        ctk.CTkLabel(self.sidebar, text="🛡️ KAINOS", font=ctk.CTkFont(size=24, weight="bold")).pack(pady=(30, 10))
+        ctk.CTkLabel(self.sidebar, text="AUDITOR", font=ctk.CTkFont(size=16)).pack(pady=(0, 20))
+        
+        self.status_indicator = ctk.CTkLabel(self.sidebar, text="⚫ CONECTANDO...", font=("Arial", 12, "bold"))
+        self.status_indicator.pack(pady=10)
+        
+        ctk.CTkLabel(self.sidebar, text="_________________", text_color="gray").pack(pady=10)
+        
+        self.btn_reboot = ctk.CTkButton(self.sidebar, text="🔄 REINICIAR PI", fg_color="#c0392b", hover_color="#e74c3c", command=self.cmd_reboot)
+        self.btn_reboot.pack(pady=20, padx=20, side="bottom")
 
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="KAINOS\nWARFARE", font=ctk.CTkFont(size=24, weight="bold"))
-        self.logo_label.grid(row=0, column=0, padx=20, pady=(20, 10))
-
-        # Botones de Acción
-        self.btn_monitor = ctk.CTkButton(self.sidebar, text="📡 Modo Monitor", command=self.enable_monitor)
-        self.btn_monitor.grid(row=1, column=0, padx=20, pady=10)
-
-        self.btn_scan = ctk.CTkButton(self.sidebar, text="🔍 Escanear WiFi", command=self.scan_networks)
-        self.btn_scan.grid(row=2, column=0, padx=20, pady=10)
-
-        self.btn_deauth = ctk.CTkButton(self.sidebar, text="😈 Ataque Deauth", command=self.run_deauth, fg_color="#990000", hover_color="#660000")
-        self.btn_deauth.grid(row=3, column=0, padx=20, pady=10)
-
-        self.btn_tracker = ctk.CTkButton(self.sidebar, text="🕵️ Rastreador", command=self.run_tracker, fg_color="#4B0082", hover_color="#38006b")
-        self.btn_tracker.grid(row=4, column=0, padx=20, pady=10)
-
-        self.btn_vuln = ctk.CTkButton(self.sidebar, text="🛡️ Vuln Scan", command=self.run_vuln_scan, fg_color="#FF8C00", hover_color="#cc7000")
-        self.btn_vuln.grid(row=5, column=0, padx=20, pady=10)
-
-        self.btn_bettercap = ctk.CTkButton(self.sidebar, text="☠️ Bettercap", command=self.run_bettercap, fg_color="#000000", hover_color="#333333", border_color="red", border_width=1)
-        self.btn_bettercap.grid(row=6, column=0, padx=20, pady=10)
-
-        # --- PANEL PRINCIPAL ---
-        self.main_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="transparent")
+        # --- MAIN AREA ---
+        self.main_frame = ctk.CTkScrollableFrame(self, label_text="REDES DETECTADAS (Tiempo Real)")
         self.main_frame.grid(row=0, column=1, padx=20, pady=20, sticky="nsew")
-        self.main_frame.grid_rowconfigure(2, weight=1)
-        self.main_frame.grid_columnconfigure(0, weight=1)
-
-
-        # 1. CONFIGURACIÓN (TARGETING)
-        self.config_frame = ctk.CTkFrame(self.main_frame)
-        self.config_frame.grid(row=0, column=0, sticky="ew", pady=(0, 20))
-        self.config_frame.grid_columnconfigure(3, weight=1)
-
-        ctk.CTkLabel(self.config_frame, text="SELECCIÓN DE OBJETIVO (DESDE SCAN)", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, padx=10, pady=5, sticky="w", columnspan=4)
-
-        # Smart Target Selector
-        ctk.CTkLabel(self.config_frame, text="Red Detectada:").grid(row=1, column=0, padx=10, pady=5, sticky="e")
-        self.combo_targets = ctk.CTkComboBox(self.config_frame, width=300, command=self.on_target_select)
-        self.combo_targets.set("--- Escanea primero ---")
-        self.combo_targets.grid(row=1, column=1, padx=10, pady=5, sticky="ew", columnspan=2)
         
-        self.btn_refresh = ctk.CTkButton(self.config_frame, text="🔄", width=30, command=self.load_targets)
-        self.btn_refresh.grid(row=1, column=3, padx=5, pady=5, sticky="w")
+        # Iniciar loop de actualización
+        self.after(1000, self.update_loop)
 
-        # Manual Override (Hidden/Secondary)
-        ctk.CTkLabel(self.config_frame, text="BSSID:").grid(row=2, column=0, padx=10, pady=5, sticky="e")
-        self.entry_bssid = ctk.CTkEntry(self.config_frame, textvariable=self.target_bssid_var, placeholder_text="Auto-relleno")
-        self.entry_bssid.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
-
-        ctk.CTkLabel(self.config_frame, text="Canal:").grid(row=2, column=2, padx=10, pady=5, sticky="e")
-        self.combo_channel = ctk.CTkComboBox(self.config_frame, variable=self.channel_var, values=["Auto"] + [str(i) for i in range(1, 15)])
-        self.combo_channel.grid(row=2, column=3, padx=10, pady=5, sticky="w")
-
-
-        # Network Targets
-        ctk.CTkLabel(self.config_frame, text="IP / Rango:").grid(row=2, column=0, padx=10, pady=5, sticky="e")
-        self.entry_ip = ctk.CTkEntry(self.config_frame, textvariable=self.target_ip_var)
-        self.entry_ip.grid(row=2, column=1, padx=10, pady=5, sticky="ew")
-
-        ctk.CTkLabel(self.config_frame, text="Puertos:").grid(row=2, column=2, padx=10, pady=5, sticky="e")
-        self.combo_ports = ctk.CTkComboBox(self.config_frame, variable=self.ports_var, values=["Top 100", "Full (1-65535)", "Web (80,443)", "SSH (22)"])
-        self.combo_ports.grid(row=2, column=3, padx=10, pady=5, sticky="w")
-
-        # 2. SYNC CONTROL
-        self.sync_frame = ctk.CTkFrame(self.main_frame, fg_color="#1a1a1a")
-        self.sync_frame.grid(row=1, column=0, sticky="ew", pady=(0, 20))
-        
-        self.lbl_sync = ctk.CTkLabel(self.sync_frame, text="☁️ FIREBASE SYNC:", font=ctk.CTkFont(weight="bold"))
-        self.lbl_sync.pack(side="left", padx=20, pady=10)
-        
-        self.switch_sync = ctk.CTkSwitch(self.sync_frame, text="DESACTIVADO", command=self.toggle_sync, onvalue="ON", offvalue="OFF", progress_color="#00ff00")
-        self.switch_sync.pack(side="left", padx=10)
-
-        # 3. LOGS
-        self.log_box = ctk.CTkTextbox(self.main_frame, font=("Consolas", 12))
-        self.log_box.grid(row=2, column=0, sticky="nsew")
-        self.log_box.insert("0.0", "--- SISTEMA LISTO ---\n")
-
-    def log(self, msg):
-        self.log_box.insert("end", f"> {msg}\n")
-        self.log_box.see("end")
-
-    def load_targets(self):
-        """Carga las redes desde networks.json"""
+    def update_loop(self):
+        """Consulta Firebase y actualiza la UI."""
         try:
-            if os.path.exists('networks.json'):
-                with open('networks.json', 'r') as f:
-                    data = json.load(f)
-                
-                self.network_data = data # Guardar referencia
-                targets = []
-                for bssid_key, info in data.items():
-                    bssid = bssid_key.replace("-", ":")
-                    ssid = info.get('ssid', 'Hidden')
-                    rssi = info.get('power', '?')
-                    targets.append(f"{ssid} | {bssid} | {rssi}dBm")
-                
-                self.combo_targets.configure(values=targets)
-                self.log(f"Cargados {len(targets)} objetivos desde caché.")
-            else:
-                self.log("⚠️ No hay datos de escaneo. Ejecuta 'Escanear WiFi' primero.")
+            # Leer todo el nodo
+            data = ref_root.get()
+            if data:
+                self.update_status(data.get('status', {}))
+                self.render_networks(data.get('networks', {}))
         except Exception as e:
-            self.log(f"Error cargando targets: {e}")
-
-    def on_target_select(self, choice):
-        """Auto-rellena BSSID y Canal al seleccionar del combo"""
-        try:
-            # choice format: "SSID | BSSID | RSSI"
-            parts = choice.split(" | ")
-            if len(parts) >= 2:
-                bssid = parts[1]
-                self.target_bssid_var.set(bssid)
-                
-                # Buscar canal en los datos cargados
-                key = bssid.replace(":", "-")
-                if hasattr(self, 'network_data') and key in self.network_data:
-                    channel = self.network_data[key].get('channel', 'Auto')
-                    self.channel_var.set(channel)
-                    self.log(f"Objetivo fijado: {parts[0]} (CH {channel})")
-        except:
-            pass
-
-
-
-    # --- LOGICA ---
-    def toggle_sync(self):
-        if self.switch_sync.get() == "ON":
-            self.switch_sync.configure(text="ACTIVADO (Subiendo datos...)")
-            self.log("Iniciando servicio de sincronización...")
-            # Lanzar sync_service.py en segundo plano
-            self.sync_process = subprocess.Popen(["python3", "sync_service.py"])
-        else:
-            self.switch_sync.configure(text="DESACTIVADO")
-            self.log("Deteniendo sincronización...")
-            if self.sync_process:
-                self.sync_process.terminate()
-                self.sync_process = None
-
-    def enable_monitor(self):
-        self.log("Activando Modo Monitor...")
-        subprocess.Popen("lxterminal -e 'sudo ./setup_monitor.sh'", shell=True)
-
-    def scan_networks(self):
-        self.log("Escaneando redes...")
-        subprocess.Popen("lxterminal -e 'sudo ./scan_networks.sh'", shell=True)
-
-    def run_deauth(self):
-        target = self.target_bssid_var.get()
-        channel = self.channel_var.get()
+            print(f"Error sync: {e}")
         
-        if not target:
-            self.log("❌ ERROR: Debes especificar un BSSID objetivo arriba.")
+        self.after(3000, self.update_loop) # Actualizar cada 3 seg
+
+    def update_status(self, status):
+        if status.get('online'):
+            self.status_indicator.configure(text="🟢 ONLINE", text_color="#2ecc71")
+        else:
+            self.status_indicator.configure(text="🔴 OFFLINE", text_color="#e74c3c")
+
+    def render_networks(self, networks):
+        # Limpiar frame (optimizable)
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+            
+        if not networks:
+            ctk.CTkLabel(self.main_frame, text="Esperando datos del agente...").pack(pady=20)
             return
-            
-        cmd = f"sudo ./deauth_test.sh {target}"
-        if channel != "Auto":
-            cmd += f" {channel}"
-            
-        self.log(f"Lanzando ataque a {target} (CH: {channel})...")
-        subprocess.Popen(f"lxterminal -e '{cmd}'", shell=True)
 
-    def run_tracker(self):
-        self.log("Iniciando Rastreador...")
-        subprocess.Popen("lxterminal -e 'sudo python3 tracker.py'", shell=True)
+        # Ordenar por potencia
+        sorted_nets = sorted(networks.items(), key=lambda x: int(x[1].get('pwr', -100)), reverse=True)
+        
+        for bssid, info in sorted_nets:
+            self.create_card(bssid, info)
 
-    def run_vuln_scan(self):
-        target = self.target_ip_var.get()
-        self.log(f"Escaneando vulnerabilidades en {target}...")
-        # Pasamos el target como variable de entorno o argumento si modificamos el script
-        # Por ahora el script usa una variable interna, pero podríamos mejorarlo:
-        cmd = f"sudo ./vuln_scan.sh {target}" 
-        subprocess.Popen(f"lxterminal -e '{cmd}'", shell=True)
+    def create_card(self, bssid, info):
+        card = ctk.CTkFrame(self.main_frame, fg_color="#2b2b2b")
+        card.pack(fill="x", padx=5, pady=5)
+        
+        # Columna Izq: Info
+        info_frame = ctk.CTkFrame(card, fg_color="transparent")
+        info_frame.pack(side="left", padx=10, pady=10)
+        
+        ssid = info.get('ssid', '<Oculto>')
+        if not ssid.strip(): ssid = "<Oculto>"
+        
+        ctk.CTkLabel(info_frame, text=ssid, font=("Arial", 16, "bold")).pack(anchor="w")
+        ctk.CTkLabel(info_frame, text=f"{bssid}  |  CH: {info.get('ch')}  |  {info.get('sec')}", text_color="gray").pack(anchor="w")
+        
+        # Columna Centro: Señal
+        pwr = int(info.get('pwr', -100))
+        color = "#2ecc71" if pwr > -60 else "#f1c40f" if pwr > -80 else "#e74c3c"
+        ctk.CTkLabel(card, text=f"{pwr} dBm", text_color=color, font=("Arial", 14, "bold")).pack(side="left", padx=20)
+        
+        # Columna Der: Botón
+        btn = ctk.CTkButton(card, text="⚔️ DEAUTH", width=100, fg_color="#8e44ad", hover_color="#9b59b6",
+                            command=lambda b=bssid, c=info.get('ch'): self.cmd_deauth(b, c))
+        btn.pack(side="right", padx=10)
 
-    def run_bettercap(self):
-        self.log("Iniciando Bettercap...")
-        subprocess.Popen("lxterminal -e 'sudo bettercap'", shell=True)
+    def cmd_reboot(self):
+        ref_root.child('commands').set("reboot")
+        print("Comando enviado: REBOOT")
+
+    def cmd_deauth(self, bssid, channel):
+        cmd = f"deauth|{bssid}|{channel}"
+        ref_root.child('commands').set(cmd)
+        print(f"Comando enviado: DEAUTH -> {bssid}")
 
 if __name__ == "__main__":
-    app = KainosConsole()
+    app = KainosGUI()
     app.mainloop()

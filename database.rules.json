@@ -1,16 +1,17 @@
 {
   "rules": {
-    ".read": "auth != null",
-    ".write": "auth != null",
-    "auditoria": {
-      "live_tracking": {
-        ".indexOn": ["last_seen", "rssi"]
+    ".read": true,
+    ".write": true,
+    "kainos_auditor": {
+      "networks": {
+        ".indexOn": ["pwr", "last"]
       },
-      "redes_detectadas": {
-        ".indexOn": ["power", "last_seen"]
+      "clients": {
+        ".indexOn": ["last"]
       },
-      "reportes_vuln": {
-        ".indexOn": ["timestamp"]
+      "commands": {
+        ".read": true,
+        ".write": true
       }
     }
   }

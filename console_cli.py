@@ -1,106 +1,95 @@
-import os
-import subprocess
-import time
+import firebase_admin
+from firebase_admin import credentials, db
 from rich.console import Console
+from rich.table import Table
+from rich.live import Live
+from rich.layout import Layout
 from rich.panel import Panel
 from rich.prompt import Prompt
-from rich.table import Table
-from rich import print
+from rich import box
+import time
+import sys
+import glob
+import os
 
+# --- CONFIGURACIÓN ---
+KEY_FILES = glob.glob("kainos-auditor-firebase-adminsdk-*.json")
+if not KEY_FILES:
+    print("❌ ERROR: No se encontró la llave JSON de Firebase.")
+    sys.exit(1)
+
+DB_URL = "https://kainos-auditor-default-rtdb.firebaseio.com/"
+
+# Inicializar Firebase
+if not firebase_admin._apps:
+    cred = credentials.Certificate(KEY_FILES[0])
+    firebase_admin.initialize_app(cred, {'databaseURL': DB_URL})
+
+ref_root = db.reference('kainos_auditor')
 console = Console()
 
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
+def generate_table(data):
+    """Genera la tabla de redes detectadas."""
+    table = Table(title="📡 KAINOS AUDITOR - LIVE MONITOR", box=box.ROUNDED, expand=True)
+    table.add_column("BSSID", style="cyan")
+    table.add_column("SSID", style="white", header_style="bold")
+    table.add_column("CH", justify="center", style="magenta")
+    table.add_column("PWR", justify="center", style="green")
+    table.add_column("SEC", style="yellow")
+    table.add_column("LAST SEEN", style="dim")
 
-def show_banner():
-    clear_screen()
-    console.print(Panel.fit(
-        "[bold green]KAINOS AUDITOR SYSTEM[/bold green]\n"
-        "[cyan]Raspberry Pi 3B+ Control Center[/cyan]",
-        border_style="green"
-    ))
+    if data and 'networks' in data:
+        # Ordenar por potencia (PWR) descendente
+        nets = sorted(data['networks'].items(), key=lambda x: int(x[1].get('pwr', -100)), reverse=True)
+        for bssid, info in nets:
+            table.add_row(
+                bssid,
+                info.get('ssid', '<Oculto>'),
+                info.get('ch', '?'),
+                info.get('pwr', '?'),
+                info.get('sec', '?'),
+                info.get('last', '').split('T')[-1][:8]
+            )
+    return table
 
-def run_script(script_name, args=""):
-    """Ejecuta un script .sh o comando"""
-    console.print(f"\n[bold yellow]>> Ejecutando {script_name}...[/bold yellow]")
-    
-    # Detectar si es Windows (para pruebas) o Linux
-    if os.name == 'nt':
-        console.print("[dim]Simulando ejecución en Windows...[/dim]")
-        time.sleep(1)
-        console.print("[bold green]Comando finalizado (Simulación)[/bold green]")
-        input("\nPresiona ENTER para continuar...")
-        return
+def send_command(cmd):
+    ref_root.child('commands').set(cmd)
+    console.print(f"[bold green]⚡ Comando enviado: {cmd}[/bold green]")
+    time.sleep(1.5)
 
-    try:
-        # En Linux/RPi usamos sudo
-        cmd = f"sudo ./{script_name} {args}"
-        if script_name.endswith(".py"):
-            cmd = f"python3 {script_name} {args}"
-            
-        os.system(cmd)
-    except Exception as e:
-        console.print(f"[bold red]ERROR: {e}[/bold red]")
-    
-    input("\nPresiona ENTER para continuar...")
+def main_loop():
+    with Live(generate_table(None), refresh_per_second=1, screen=True) as live:
+        while True:
+            try:
+                data = ref_root.get()
+                live.update(generate_table(data))
+            except KeyboardInterrupt:
+                break
+            except Exception:
+                time.sleep(2)
 
-def menu_monitor_mode():
-    run_script("setup_monitor.sh")
-
-def menu_scan():
-    console.print("\n[bold cyan]INICIANDO ESCANEO...[/bold cyan]")
-    console.print("Presiona [bold red]CTRL+C[/bold red] para detener el escaneo cuando quieras.")
-    time.sleep(2)
-    run_script("scan_networks.sh")
-
-def menu_deauth():
-    target = Prompt.ask("\n[bold red]Introduce el BSSID (MAC) del objetivo[/bold red]")
-    if not target:
-        return
-    
-    channel = Prompt.ask("[bold cyan]Canal (Opcional, ENTER para saltar)[/bold cyan]")
-    
-    args = f"{target} {channel}".strip()
-    run_script("deauth_test.sh", args)
-
-def menu_firebase():
-    run_script("auditor.py")
-
-def main_menu():
+    # Menú al salir con Ctrl+C
     while True:
-        show_banner()
+        console.clear()
+        console.print(Panel.fit("⚔️ KAINOS COMMAND CENTER", style="bold red"))
+        console.print("1. 📡 Volver al Monitor")
+        console.print("2. 💥 Lanzar Deauth (Ataque)")
+        console.print("3. 🔄 Reiniciar Raspberry")
+        console.print("4. 🚪 Salir")
         
-        table = Table(show_header=False, box=None)
-        table.add_row("[bold green]1.[/bold green] 📡 Activar Modo Monitor")
-        table.add_row("[bold green]2.[/bold green] 🔍 Escanear Redes (Airodump)")
-        table.add_row("[bold green]3.[/bold green] 😈 Ataque Deauth (Desconexión)")
-        table.add_row("[bold magenta]4.[/bold magenta] 📡 Rastreador (Probe Requests)")
-        table.add_row("[bold yellow]5.[/bold yellow] 🛡️ Escáner de Vulnerabilidades")
-        table.add_row("[bold red]6.[/bold red] ☠️ Bettercap (MITM)")
-        table.add_row("[bold blue]7.[/bold blue] ☁️  Sincronizar con Firebase")
-        table.add_row("[bold red]0.[/bold red] 🚪 Salir")
+        choice = Prompt.ask("Opción", choices=["1", "2", "3", "4"])
         
-        console.print(table)
-        
-        choice = Prompt.ask("\n[bold cyan]Selecciona una opción[/bold cyan]", choices=["1", "2", "3", "4", "5", "6", "7", "0"])
-        
-        if choice == "1":
-            menu_monitor_mode()
+        if choice == "1": main_loop()
         elif choice == "2":
-            menu_scan()
+            target = Prompt.ask("BSSID Objetivo")
+            channel = Prompt.ask("Canal")
+            send_command(f"deauth|{target}|{channel}")
         elif choice == "3":
-            menu_deauth()
-        elif choice == "4":
-            run_script("tracker.py")
-        elif choice == "5":
-            run_script("vuln_scan.sh")
-        elif choice == "6":
-            run_script("bettercap") # Bettercap es un binario, no un script local
-        elif choice == "7":
-            menu_firebase()
-        elif choice == "0":
-            console.print("[bold green]Saliendo... ¡Happy Hacking![/bold green]")
-            break
+            if Prompt.ask("¿Seguro?", choices=["s", "n"]) == "s": send_command("reboot")
+        elif choice == "4": sys.exit(0)
 
 if __name__ == "__main__":
-    main_menu()
+    try:
+        main_loop()
+    except KeyboardInterrupt:
+        pass

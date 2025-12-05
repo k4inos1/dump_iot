@@ -4,3 +4,4 @@ customtkinter
 packaging
 pillow
 rich
+paramiko
