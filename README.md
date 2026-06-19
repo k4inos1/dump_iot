@@ -1,4 +1,4 @@
-# 🛡️ KAINOS AUDITOR
+# Sistema auditoria Raspberry PI
 
 > **Sistema de Auditoría Wi-Fi IoT con Sincronización en la Nube**
 
